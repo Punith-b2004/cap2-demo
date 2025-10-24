@@ -18,7 +18,11 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain.tools import tool
 
-# Initialize Groq LLM with API key from environment variable
+# Verify GROQ_API_KEY
+if not os.getenv("GROQ_API_KEY"):
+    raise ValueError("GROQ_API_KEY environment variable is not set")
+
+# Initialize Groq LLM
 llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.1, api_key=os.getenv("GROQ_API_KEY"))
 
 # Define web crawler tool
