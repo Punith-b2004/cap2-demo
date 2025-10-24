@@ -1,2 +1,4 @@
 libpq-dev
 poppler-utils
+libblas-dev
+liblapack-dev

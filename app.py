@@ -107,7 +107,7 @@ def create_vector_store(web_content, pdf_content):
     )
     return vectorstore
 
-# Function to format documents
+# Function to formatlijf documents
 def format_docs(docs):
     formatted_docs = []
     for doc in docs:
