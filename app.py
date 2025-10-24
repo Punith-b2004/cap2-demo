@@ -1,4 +1,4 @@
-import gradio as gr
+import streamlit as st
 import langchain
 import groq
 import chromadb
@@ -20,7 +20,8 @@ from langchain.tools import tool
 
 # Verify GROQ_API_KEY
 if not os.getenv("GROQ_API_KEY"):
-    raise ValueError("GROQ_API_KEY environment variable is not set")
+    st.error("GROQ_API_KEY environment variable is not set. Please configure it in Streamlit secrets.")
+    st.stop()
 
 # Initialize Groq LLM
 llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.1, api_key=os.getenv("GROQ_API_KEY"))
@@ -107,7 +108,7 @@ def create_vector_store(web_content, pdf_content):
     )
     return vectorstore
 
-# Function to formatlijf documents
+# Function to format documents
 def format_docs(docs):
     formatted_docs = []
     for doc in docs:
@@ -148,42 +149,51 @@ def run_rag(query, web_content, pdf_content):
     except Exception as e:
         return f"Error running RAG pipeline: {str(e)}"
 
-# Gradio interface functions
-def fetch_web_content(url):
-    if not url:
-        return "Please enter a valid URL."
-    return web_crawler.invoke(url)
+# Streamlit interface
+st.title("🧠 RAG Pipeline Interface")
 
-def fetch_pdf_content(pdf_file):
-    if not pdf_file:
-        return "Please upload a valid PDF file."
-    # Save uploaded file to temporary directory
-    temp_pdf_path = "/tmp/uploaded_pdf.pdf"
-    with open(temp_pdf_path, "wb") as f:
-        f.write(pdf_file.read())
-    return research_paper_scraper.invoke(temp_pdf_path)
+# Initialize session state for web and PDF content
+if "web_content" not in st.session_state:
+    st.session_state.web_content = ""
+if "pdf_content" not in st.session_state:
+    st.session_state.pdf_content = ""
 
-# Gradio interface
-demo = gr.Blocks()
-with demo:
-    gr.Markdown("# 🧠 RAG Pipeline Interface")
-    with gr.Row():
-        with gr.Column():
-            url_input = gr.Textbox(label="Enter URL", placeholder="https://example.com", lines=1)
-            web_button = gr.Button("Fetch Web Content")
-            web_output = gr.Textbox(label="Web Content", lines=5, interactive=False)
-        with gr.Column():
-            pdf_input = gr.File(label="Upload PDF", file_types=[".pdf"])
-            pdf_button = gr.Button("Fetch PDF Content")
-            pdf_output = gr.Textbox(label="PDF Content", lines=5, interactive=False)
-    query_input = gr.Textbox(label="Enter Query", placeholder="What is a transformer in NLP?", lines=2)
-    query_button = gr.Button("Run Query")
-    output = gr.Textbox(label="RAG Output", lines=10, interactive=False)
+# Layout: Two columns for URL and PDF inputs
+col1, col2 = st.columns(2)
 
-    web_button.click(fn=fetch_web_content, inputs=url_input, outputs=web_output)
-    pdf_button.click(fn=fetch_pdf_content, inputs=pdf_input, outputs=pdf_output)
-    query_button.click(fn=run_rag, inputs=[query_input, web_output, pdf_output], outputs=output)
+with col1:
+    st.subheader("Web Content")
+    url_input = st.text_input("Enter URL", placeholder="https://example.com")
+    if st.button("Fetch Web Content"):
+        if url_input:
+            with st.spinner("Fetching web content..."):
+                st.session_state.web_content = web_crawler.invoke(url_input)
+        else:
+            st.error("Please enter a valid URL.")
+    st.text_area("Web Content", value=st.session_state.web_content, height=150, disabled=True)
 
-if __name__ == "__main__":
-    # For local testing; Streamlit will call demo.launch() from streamlit_app.py
-    demo.launch(server_name="0.0.0.0", server_port=int(os.environ.get("PORT", 7860)))
+with col2:
+    st.subheader("PDF Content")
+    pdf_file = st.file_uploader("Upload PDF", type=["pdf"])
+    if st.button("Fetch PDF Content"):
+        if pdf_file:
+            with st.spinner("Processing PDF..."):
+                # Save uploaded file to temporary directory
+                temp_pdf_path = "/tmp/uploaded_pdf.pdf"
+                with open(temp_pdf_path, "wb") as f:
+                    f.write(pdf_file.read())
+                st.session_state.pdf_content = research_paper_scraper.invoke(temp_pdf_path)
+        else:
+            st.error("Please upload a valid PDF file.")
+    st.text_area("PDF Content", value=st.session_state.pdf_content, height=150, disabled=True)
+
+# Query input and output
+st.subheader("Query")
+query_input = st.text_input("Enter Query", placeholder="What is a transformer in NLP?")
+if st.button("Run Query"):
+    if query_input:
+        with st.spinner("Running RAG pipeline..."):
+            result = run_rag(query_input, st.session_state.web_content, st.session_state.pdf_content)
+            st.text_area("RAG Output", value=result, height=300, disabled=True)
+    else:
+        st.error("Please enter a query.")

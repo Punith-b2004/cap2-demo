@@ -2,3 +2,4 @@ libpq-dev
 poppler-utils
 libblas-dev
 liblapack-dev
+libatlas-base-dev
