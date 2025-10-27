@@ -59,7 +59,7 @@ def research_paper_scraper(pdf_path: str) -> str:
                 "introduction": r"^\s*(introduction|1\.?\s*introduction)\s*$|^\s*1\.?\s*introduction[:\s]",
                 "conclusion": r"^\s*(conclusion|5\.?\s*conclusion)\s*$|^\s*5\.?\s*conclusion[:\s]"
             }
-            other_section_pattern = r"^\s*\d+\.?\s*[a-zA-Z\s]+$"  # Matches other section headers like "2 Transformer Architecture"
+            other_section_pattern = r"^\s*\d+\.?\s*[a-zA-Z\s]+$"  # Matches other section headers
 
             for page in pdf.pages:
                 page_text = page.extract_text()
@@ -71,7 +71,7 @@ def research_paper_scraper(pdf_path: str) -> str:
                         # Check for section headers
                         if re.match(section_patterns["abstract"], line_lower):
                             current_section = "abstract"
-                            continue  # Skip the header line
+                            continue
                         elif re.match(section_patterns["introduction"], line_lower):
                             current_section = "introduction"
                             continue
@@ -79,7 +79,7 @@ def research_paper_scraper(pdf_path: str) -> str:
                             current_section = "conclusion"
                             continue
                         elif re.match(other_section_pattern, line_lower):
-                            current_section = None  # Stop collecting if another section starts
+                            current_section = None
                         
                         # Collect text for the current section
                         if current_section and line.strip():
@@ -99,7 +99,7 @@ def research_paper_scraper(pdf_path: str) -> str:
 def add_space_after_letters(text):
     return "".join(c + " " if c.isalnum() else c for c in text)
 
-# Initialize embeddings (FIXED: Explicitly set device to CPU)
+# Initialize embeddings (explicitly set to CPU)
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2", model_kwargs={"device": "cpu"})
 
 # Function to create vector store
@@ -129,10 +129,13 @@ def create_vector_store(web_content, pdf_content):
     vectorstore = Chroma.from_texts(
         texts=chunks,
         embedding=embeddings,
-        metadatas=metadatas,  # Explicitly pass metadatas
+        metadatas=metadatas,
         collection_name="rag_collection",
         client_settings=Settings(anonymized_telemetry=False, is_persistent=False)
     )
+    # Debug: Inspect collection metadata
+    collection = vectorstore._client.get_collection("rag_collection")
+    print("Collection Metadata:", collection.get(include=["metadatas"]))
     return vectorstore
 
 # Function to format documents
@@ -142,10 +145,11 @@ def format_docs(docs):
         if not isinstance(doc.page_content, str):
             continue
         content = doc.page_content
-        if doc.metadata.get("type") == "pdf":
+        metadata = doc.metadata if hasattr(doc, 'metadata') else {"source": "unknown", "type": "unknown"}
+        if metadata.get("type") == "pdf":
             content = add_space_after_letters(content)
         formatted_docs.append(
-            f"Source: {doc.metadata.get('source', 'unknown')} ({doc.metadata.get('type', 'unknown')})\nContent: {content}"
+            f"Source: {metadata.get('source', 'unknown')} ({metadata.get('type', 'unknown')})\nContent: {content}"
         )
     return "\n\n".join(formatted_docs)
 
@@ -158,6 +162,12 @@ def run_rag(query, web_content, pdf_content):
     try:
         vectorstore = create_vector_store(web_content, pdf_content)
         retriever = vectorstore.as_retriever(search_type="mmr", search_kwargs={"k": 3})
+        # Debug: Check retriever output
+        retrieved_docs = retriever.invoke(query)
+        print("Retrieved Documents:")
+        for i, doc in enumerate(retrieved_docs):
+            print(f"Doc {i+1}: Content: {doc.page_content[:50]}... | Metadata: {doc.metadata}")
+        
         rag_prompt = ChatPromptTemplate.from_template(
             "Use the following context to answer the question: \n{context}\n\nQuestion: {question}\nAnswer:"
         )
@@ -211,6 +221,9 @@ with col2:
                 with open(temp_pdf_path, "wb") as f:
                     f.write(pdf_file.read())
                 st.session_state.pdf_content = research_paper_scraper.invoke(temp_pdf_path)
+                # Clean up temporary file
+                if os.path.exists(temp_pdf_path):
+                    os.remove(temp_pdf_path)
                 st.rerun()
         else:
             st.error("Please upload a valid PDF file.")
@@ -223,6 +236,6 @@ if st.button("Run Query", key="run_query"):
     if query_input:
         with st.spinner("Running RAG pipeline..."):
             result = run_rag(query_input, st.session_state.web_content, st.session_state.pdf_content)
-            st.text_area("RAG Output", value=result, height=300, disabled=True, key="rag_output")
+            st.text_area("RAG Output", value=result, height=500, disabled=True, key="rag_output")
     else:
         st.error("Please enter a query.")
