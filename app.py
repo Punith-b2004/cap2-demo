@@ -121,11 +121,15 @@ def create_vector_store(web_content, pdf_content):
         doc_chunks = text_splitter.split_text(doc)
         chunks.extend(doc_chunks)
         metadatas.extend([{"source": f"document_{i+1}", "type": "web" if i == 0 else "pdf"}] * len(doc_chunks))
+        # Debug: Print chunks and their metadata
+        for chunk in doc_chunks:
+            print(f"Chunk: {chunk[:50]}... | Metadata: {{'source': 'document_{i+1}', 'type': '{'web' if i == 0 else 'pdf'}'}}")
 
     # Create in-memory vector store
     vectorstore = Chroma.from_texts(
         texts=chunks,
         embedding=embeddings,
+        metadatas=metadatas,  # Explicitly pass metadatas
         collection_name="rag_collection",
         client_settings=Settings(anonymized_telemetry=False, is_persistent=False)
     )
