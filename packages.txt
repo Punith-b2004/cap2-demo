@@ -3,3 +3,4 @@ poppler-utils
 libblas-dev
 liblapack-dev
 libatlas-base-dev
+gfortran
