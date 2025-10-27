@@ -17,7 +17,7 @@ from langchain_chroma import Chroma
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain.tools import tool
-from chromadb.config import Settings  # Added for in-memory client settings
+from chromadb.config import Settings
 
 # Verify GROQ_API_KEY
 if not os.getenv("GROQ_API_KEY"):
@@ -75,10 +75,10 @@ def research_paper_scraper(pdf_path: str) -> str:
 def add_space_after_letters(text):
     return "".join(c + " " if c.isalnum() else c for c in text)
 
-# Initialize embeddings
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+# Initialize embeddings (FIXED: Explicitly set device to CPU)
+embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2", model_kwargs={"device": "cpu"})
 
-# Function to create vector store (FIXED: In-memory mode, no persist_directory)
+# Function to create vector store
 def create_vector_store(web_content, pdf_content):
     documents = []
     if "Error" not in web_content:
@@ -98,12 +98,12 @@ def create_vector_store(web_content, pdf_content):
         chunks.extend(doc_chunks)
         metadatas.extend([{"source": f"document_{i+1}", "type": "web" if i == 0 else "pdf"}] * len(doc_chunks))
 
-    # Create in-memory vector store (no persistence, avoids tenant error)
+    # Create in-memory vector store
     vectorstore = Chroma.from_texts(
         texts=chunks,
         embedding=embeddings,
         collection_name="rag_collection",
-        client_settings=Settings(anonymized_telemetry=False, is_persistent=False)  # Force in-memory
+        client_settings=Settings(anonymized_telemetry=False, is_persistent=False)
     )
     return vectorstore
 
@@ -167,7 +167,7 @@ with col1:
         if url_input:
             with st.spinner("Fetching web content..."):
                 st.session_state.web_content = web_crawler.invoke(url_input)
-                st.rerun()  # Refresh to update text area
+                st.rerun()
         else:
             st.error("Please enter a valid URL.")
     st.text_area("Web Content", value=st.session_state.web_content, height=150, disabled=True, key="web_output")
@@ -183,7 +183,7 @@ with col2:
                 with open(temp_pdf_path, "wb") as f:
                     f.write(pdf_file.read())
                 st.session_state.pdf_content = research_paper_scraper.invoke(temp_pdf_path)
-                st.rerun()  # Refresh to update text area
+                st.rerun()
         else:
             st.error("Please upload a valid PDF file.")
     st.text_area("PDF Content", value=st.session_state.pdf_content, height=150, disabled=True, key="pdf_output")
