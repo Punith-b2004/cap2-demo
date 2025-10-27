@@ -19,6 +19,17 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain.tools import tool
 from chromadb.config import Settings
+import pkg_resources
+
+# Verify library versions
+required_versions = {
+    "chromadb": "0.5.0",
+    "langchain-chroma": "0.1.2"
+}
+for pkg, version in required_versions.items():
+    installed_version = pkg_resources.get_distribution(pkg).version
+    if installed_version != version:
+        st.warning(f"{pkg} version {installed_version} detected. Expected {version}. Consider running `pip install {pkg}=={version}`.")
 
 # Verify GROQ_API_KEY
 if not os.getenv("GROQ_API_KEY"):
@@ -67,8 +78,6 @@ def research_paper_scraper(pdf_path: str) -> str:
                     lines = page_text.split('\n')
                     for line in lines:
                         line_lower = line.lower().strip()
-                        
-                        # Check for section headers
                         if re.match(section_patterns["abstract"], line_lower):
                             current_section = "abstract"
                             continue
@@ -80,12 +89,9 @@ def research_paper_scraper(pdf_path: str) -> str:
                             continue
                         elif re.match(other_section_pattern, line_lower):
                             current_section = None
-                        
-                        # Collect text for the current section
                         if current_section and line.strip():
                             text[current_section].append(line.strip())
             
-            # Combine the text for each section
             result = ""
             for section in ["abstract", "introduction", "conclusion"]:
                 if text[section]:
@@ -125,17 +131,21 @@ def create_vector_store(web_content, pdf_content):
         for chunk in doc_chunks:
             print(f"Chunk: {chunk[:50]}... | Metadata: {{'source': 'document_{i+1}', 'type': '{'web' if i == 0 else 'pdf'}'}}")
 
-    # Create in-memory vector store
+    # Create persistent vector store
+    persist_directory = "/tmp/chroma_rag"
+    if os.path.exists(persist_directory):
+        shutil.rmtree(persist_directory)  # Clean up previous store
     vectorstore = Chroma.from_texts(
         texts=chunks,
         embedding=embeddings,
         metadatas=metadatas,
         collection_name="rag_collection",
-        client_settings=Settings(anonymized_telemetry=False, is_persistent=False)
+        client_settings=Settings(anonymized_telemetry=False, is_persistent=True, persist_directory=persist_directory)
     )
     # Debug: Inspect collection metadata
     collection = vectorstore._client.get_collection("rag_collection")
-    print("Collection Metadata:", collection.get(include=["metadatas"]))
+    collection_data = collection.get(include=["metadatas"])
+    print(f"Collection Metadata ({len(collection_data['metadatas'])} items):", collection_data["metadatas"])
     return vectorstore
 
 # Function to format documents
@@ -145,7 +155,7 @@ def format_docs(docs):
         if not isinstance(doc.page_content, str):
             continue
         content = doc.page_content
-        metadata = doc.metadata if hasattr(doc, 'metadata') else {"source": "unknown", "type": "unknown"}
+        metadata = doc.metadata if hasattr(doc, 'metadata') and doc.metadata else {"source": "unknown", "type": "unknown"}
         if metadata.get("type") == "pdf":
             content = add_space_after_letters(content)
         formatted_docs.append(
@@ -166,7 +176,8 @@ def run_rag(query, web_content, pdf_content):
         retrieved_docs = retriever.invoke(query)
         print("Retrieved Documents:")
         for i, doc in enumerate(retrieved_docs):
-            print(f"Doc {i+1}: Content: {doc.page_content[:50]}... | Metadata: {doc.metadata}")
+            metadata = doc.metadata if hasattr(doc, 'metadata') else {"source": "unknown", "type": "unknown"}
+            print(f"Doc {i+1}: Content: {doc.page_content[:50]}... | Metadata: {metadata}")
         
         rag_prompt = ChatPromptTemplate.from_template(
             "Use the following context to answer the question: \n{context}\n\nQuestion: {question}\nAnswer:"
@@ -181,7 +192,8 @@ def run_rag(query, web_content, pdf_content):
         sources = retriever.invoke(query)
         source_text = "Sources:\n" + "-"*50 + "\n"
         for i, doc in enumerate(sources):
-            source_text += f"Source {i+1} (Metadata: {doc.metadata}):\n{doc.page_content[:100]}...\n"
+            metadata = doc.metadata if hasattr(doc, 'metadata') else {"source": "unknown", "type": "unknown"}
+            source_text += f"Source {i+1} (Metadata: {metadata}):\n{doc.page_content[:100]}...\n"
         return f"RAG Answer:\n{'-'*50}\n{response}\n{'-'*50}\n{source_text}"
     except Exception as e:
         return f"Error running RAG pipeline: {str(e)}"
@@ -216,12 +228,10 @@ with col2:
     if st.button("Fetch PDF Content", key="fetch_pdf"):
         if pdf_file:
             with st.spinner("Processing PDF..."):
-                # Save uploaded file to temporary directory
                 temp_pdf_path = "/tmp/uploaded_pdf.pdf"
                 with open(temp_pdf_path, "wb") as f:
                     f.write(pdf_file.read())
                 st.session_state.pdf_content = research_paper_scraper.invoke(temp_pdf_path)
-                # Clean up temporary file
                 if os.path.exists(temp_pdf_path):
                     os.remove(temp_pdf_path)
                 st.rerun()
@@ -236,6 +246,6 @@ if st.button("Run Query", key="run_query"):
     if query_input:
         with st.spinner("Running RAG pipeline..."):
             result = run_rag(query_input, st.session_state.web_content, st.session_state.pdf_content)
-            st.text_area("RAG Output", value=result, height=500, disabled=True, key="rag_output")
+            st.text_area("RAG Output", value=result, height=600, disabled=True, key="rag_output")
     else:
         st.error("Please enter a query.")
