@@ -17,6 +17,7 @@ from langchain_chroma import Chroma
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain.tools import tool
+from chromadb.config import Settings  # Added for in-memory client settings
 
 # Verify GROQ_API_KEY
 if not os.getenv("GROQ_API_KEY"):
@@ -77,7 +78,7 @@ def add_space_after_letters(text):
 # Initialize embeddings
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-# Function to create vector store
+# Function to create vector store (FIXED: In-memory mode, no persist_directory)
 def create_vector_store(web_content, pdf_content):
     documents = []
     if "Error" not in web_content:
@@ -85,9 +86,8 @@ def create_vector_store(web_content, pdf_content):
     if "Error" not in pdf_content:
         documents.append(pdf_content)
 
-    # Use temporary directory for Chroma persistence
-    persist_directory = "/tmp/chroma_db"
-    shutil.rmtree(persist_directory, ignore_errors=True)
+    if not documents:
+        raise ValueError("No valid documents to index.")
 
     # Split documents into chunks and assign metadata
     text_splitter = CharacterTextSplitter(chunk_size=200, chunk_overlap=20, separator="\n")
@@ -98,13 +98,12 @@ def create_vector_store(web_content, pdf_content):
         chunks.extend(doc_chunks)
         metadatas.extend([{"source": f"document_{i+1}", "type": "web" if i == 0 else "pdf"}] * len(doc_chunks))
 
-    # Create and persist vector store
+    # Create in-memory vector store (no persistence, avoids tenant error)
     vectorstore = Chroma.from_texts(
         texts=chunks,
         embedding=embeddings,
         collection_name="rag_collection",
-        persist_directory=persist_directory,
-        metadatas=metadatas
+        client_settings=Settings(anonymized_telemetry=False, is_persistent=False)  # Force in-memory
     )
     return vectorstore
 
@@ -163,19 +162,20 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("Web Content")
-    url_input = st.text_input("Enter URL", placeholder="https://example.com")
-    if st.button("Fetch Web Content"):
+    url_input = st.text_input("Enter URL", placeholder="https://example.com", key="url_input")
+    if st.button("Fetch Web Content", key="fetch_web"):
         if url_input:
             with st.spinner("Fetching web content..."):
                 st.session_state.web_content = web_crawler.invoke(url_input)
+                st.rerun()  # Refresh to update text area
         else:
             st.error("Please enter a valid URL.")
-    st.text_area("Web Content", value=st.session_state.web_content, height=150, disabled=True)
+    st.text_area("Web Content", value=st.session_state.web_content, height=150, disabled=True, key="web_output")
 
 with col2:
     st.subheader("PDF Content")
-    pdf_file = st.file_uploader("Upload PDF", type=["pdf"])
-    if st.button("Fetch PDF Content"):
+    pdf_file = st.file_uploader("Upload PDF", type=["pdf"], key="pdf_uploader")
+    if st.button("Fetch PDF Content", key="fetch_pdf"):
         if pdf_file:
             with st.spinner("Processing PDF..."):
                 # Save uploaded file to temporary directory
@@ -183,17 +183,18 @@ with col2:
                 with open(temp_pdf_path, "wb") as f:
                     f.write(pdf_file.read())
                 st.session_state.pdf_content = research_paper_scraper.invoke(temp_pdf_path)
+                st.rerun()  # Refresh to update text area
         else:
             st.error("Please upload a valid PDF file.")
-    st.text_area("PDF Content", value=st.session_state.pdf_content, height=150, disabled=True)
+    st.text_area("PDF Content", value=st.session_state.pdf_content, height=150, disabled=True, key="pdf_output")
 
 # Query input and output
 st.subheader("Query")
-query_input = st.text_input("Enter Query", placeholder="What is a transformer in NLP?")
-if st.button("Run Query"):
+query_input = st.text_input("Enter Query", placeholder="What is a transformer in NLP?", key="query_input")
+if st.button("Run Query", key="run_query"):
     if query_input:
         with st.spinner("Running RAG pipeline..."):
             result = run_rag(query_input, st.session_state.web_content, st.session_state.pdf_content)
-            st.text_area("RAG Output", value=result, height=300, disabled=True)
+            st.text_area("RAG Output", value=result, height=300, disabled=True, key="rag_output")
     else:
         st.error("Please enter a query.")
