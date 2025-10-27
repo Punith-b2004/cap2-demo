@@ -9,6 +9,7 @@ import sentence_transformers
 import os
 import shutil
 from bs4 import BeautifulSoup
+import re
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -51,23 +52,46 @@ def research_paper_scraper(pdf_path: str) -> str:
     """Extracts abstract, introduction, and conclusion from a PDF research paper."""
     try:
         with pdfplumber.open(pdf_path) as pdf:
-            text = ""
-            current_section = ""
+            text = {"abstract": [], "introduction": [], "conclusion": []}
+            current_section = None
+            section_patterns = {
+                "abstract": r"^\s*(abstract)\s*$|^\s*abstract[:\s]",
+                "introduction": r"^\s*(introduction|1\.?\s*introduction)\s*$|^\s*1\.?\s*introduction[:\s]",
+                "conclusion": r"^\s*(conclusion|5\.?\s*conclusion)\s*$|^\s*5\.?\s*conclusion[:\s]"
+            }
+            other_section_pattern = r"^\s*\d+\.?\s*[a-zA-Z\s]+$"  # Matches other section headers like "2 Transformer Architecture"
+
             for page in pdf.pages:
                 page_text = page.extract_text()
                 if page_text:
                     lines = page_text.split('\n')
                     for line in lines:
-                        line_lower = line.lower()
-                        if "abstract" in line_lower:
+                        line_lower = line.lower().strip()
+                        
+                        # Check for section headers
+                        if re.match(section_patterns["abstract"], line_lower):
                             current_section = "abstract"
-                        elif "introduction" in line_lower:
+                            continue  # Skip the header line
+                        elif re.match(section_patterns["introduction"], line_lower):
                             current_section = "introduction"
-                        elif "conclusion" in line_lower:
+                            continue
+                        elif re.match(section_patterns["conclusion"], line_lower):
                             current_section = "conclusion"
-                        if current_section:
-                            text += line + " "
-            return text.strip()[:2000]
+                            continue
+                        elif re.match(other_section_pattern, line_lower):
+                            current_section = None  # Stop collecting if another section starts
+                        
+                        # Collect text for the current section
+                        if current_section and line.strip():
+                            text[current_section].append(line.strip())
+            
+            # Combine the text for each section
+            result = ""
+            for section in ["abstract", "introduction", "conclusion"]:
+                if text[section]:
+                    result += f"{section.capitalize()}:\n{' '.join(text[section])}\n\n"
+            
+            return result.strip()[:2000] or "No abstract, introduction, or conclusion found."
     except Exception as e:
         return f"Error processing PDF: {str(e)}"
 
